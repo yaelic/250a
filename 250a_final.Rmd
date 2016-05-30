@@ -2,7 +2,7 @@
 title: "Final 250a project!"
 author: "Yael Reuben Ben"
 date: "May 27, 2016"
-output: pdf_document
+output: html_document
 ---
 
 Connecting Rstudio to out H20 cluster
@@ -48,7 +48,7 @@ df %>%
 ```
 
 
-Adding station data - joining
+## First attempt at adding weather data
 
 ```{r}
 # stations <- h2o.getFrame("emshr_lite.hex")
@@ -67,7 +67,11 @@ Adding station data - joining
 
 ```
 
+
+## Joing with weather data
+
 In the first try we saw the data set wasn't parsing correctly. 
+
 We found another data set and tried again:
 ```{r}
 # try again new data. forst one has a parsing problem becuase of fixed width
@@ -80,7 +84,7 @@ h2o.unique(j2$stateprov)
 # Looks better!
 ```
 
-Plotting global wearming in specific location
+## Plotting global wearming in specific location
 
 Alaska colder than Texas: trends per-station
 
@@ -99,7 +103,7 @@ j2.TX_AK.df %>%
 
 ```
 
-Winter colder than summer: trends per-day-of-year
+## Winter colder than summer: trends per-day-of-year
 ```{r}
 names(orig)
 summary(orig)
@@ -114,8 +118,10 @@ temp_by_md.df  %>%
 ###
 ```
 
+Some funkiness going on here, but including 'MonthDay' together won't make a difference in our prediction task later on.
 
-Find increases in weather extremes
+## Find increases in weather extremes
+
 Increases in tornadoes
 
 ```{r}
@@ -132,7 +138,7 @@ tornado_by_year.df %>%
     geom_line(mapping = aes(x = Year, y = sum_tornado))
 ```
 
-Increases in std-dev of min & max temps
+## Increases in std-dev of min & max temps
 ```{r}
 
 temp_by_year <- h2o.group_by(orig, by="Year",
@@ -157,11 +163,12 @@ temp_by_year.df %>%
 ```
 
 
-Predict temp for given day & place
+# Model runs
 
 step1 - created basic model in flow
   a. split data 25 - 75
   b. pick cols
+
 
 ```{r}
 h2o.getModel("glm-da2b9e9f-1d54-4459-8521-fb5119f3f434")
@@ -179,7 +186,7 @@ h2o.getModel("glm-0a2dfcb7-f79b-4c62-8db1-d5b8b4d31ffb")
 ```
 It works very poorly - r2 = 0.08
 
-We noticed that ittreads station and WBAN as numeric. we converted to enum and ran again:
+We noticed that it reads station and WBAN as numeric. we converted to enum and ran again:
 
 ```{r}
 h2o.getModel("glm-f1e8f8e6-3dee-4626-ac7c-0b074df6a606")
@@ -232,3 +239,34 @@ summary(j2.rf)
 WOW we won R2 = 0.5577518
 
 Random forest for the win!
+
+# Summary:
+
+The original data set only included a set of variables giving use *day of* information. This would be cheating on the prediction task (using presence of snow to predict temp), so we decided to bring in geographic information. We explored a number of different possible data sets that gave use lat and long for weather stations and finally ended up using data from NOAA http://www.ncdc.noaa.gov/homr/reports.
+
+We compared a number of models including:
+
+baseline 1: glm only with features from the original data set (station as numeric)
+
+r2 (3-fold CV)= 0.08
+
+baseline 2: glm only with features from the original data set (station as factor)
+
+r2 (3-fold CV)= 0.02
+
+model 1: glm with basic geographic features from original data set
+
+r2 (3-fold CV) = 0.11
+
+model 2: glm with weather station lat / long
+
+r2 (3-fold CV) = 0.29
+
+model 3: random forest (n_trees = 10, max_depth = 5)
+
+r2 (3-fold CV) = 0.56
+
+We see a huge increase in performance with RF! At the very least this indicates that we can't assume linearity in this data set (seomthing RF is great at prediciting).
+
+
+Great project! Thank you! :)
