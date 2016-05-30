@@ -1,0 +1,234 @@
+---
+title: "Final 250a project!"
+author: "Yael Reuben Ben"
+date: "May 27, 2016"
+output: pdf_document
+---
+
+Connecting Rstudio to out H20 cluster
+
+```{r}
+library(h2o)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+cluster <- h2o.init(ip="52.53.176.50", strict_version_check = FALSE)
+h2o.clusterStatus()
+```
+
+Read data frame - that we loaded to Flow
+
+```{r, echo=FALSE}
+orig <- h2o.getFrame("X1929.hex")
+summary(orig)
+```
+
+Looking at global wearming
+
+## Average temp increases over the years
+
+```{r}
+## Plotting avg
+temp_by_year <- h2o.group_by(orig, by="Year",
+                           nrow("temp"), sum("temp"), mean("temp"), sd("temp"))
+# summary(temp_by_year)
+# head(temp_by_year)
+
+df <- as.data.frame(temp_by_year)
+df %>%
+  ggplot() +
+    geom_line(mapping = aes(x = Year, y = mean_temp))
+
+# incomplete data for 2016
+df %>%
+  filter(Year != 2016) %>%
+  ggplot() +
+    geom_line(mapping = aes(x = Year, y = mean_temp))
+```
+
+
+Adding station data - joining
+
+```{r}
+# stations <- h2o.getFrame("emshr_lite.hex")
+# h2o.summary(stations)
+# head(stations)
+# orig$WBAN <- as.factor(orig$WBAN)
+# 
+# j <- h2o.merge(orig, stations)
+# j_allx <- h2o.merge(orig, stations, all.x = TRUE)
+# 
+# nrow(orig)
+# nrow(j)
+# nrow(j_allx)
+# 
+# h2o.summary(j_allx)
+
+```
+
+In the first try we saw the data set wasn't parsing correctly. 
+We found another data set and tried again:
+```{r}
+# try again new data. forst one has a parsing problem becuase of fixed width
+stations2 <- h2o.getFrame("Key_Frame__weather_stations.hex")
+j2 <- h2o.merge(orig, stations2)
+nrow(j2)
+names(j2)
+h2o.unique(j2$stateprov)
+
+# Looks better!
+```
+
+Plotting global wearming in specific location
+
+Alaska colder than Texas: trends per-station
+
+```{r}
+j2.TX_AK <- j2[j2$stateprov == "TX" | j2$stateprov == "AK",] 
+# head(j2.TX_AK)
+# h2o.summary(j2.TX_AK)
+
+j2.TX_AK.df <- as.data.frame(j2.TX_AK)
+
+j2.TX_AK.df %>%
+  filter(Station != 999999, Year != 2016) %>%
+  ggplot(mapping = aes(x = Year, y = temp, color = as.factor(stateprov))) +
+    geom_point() +
+    geom_smooth()
+
+```
+
+Winter colder than summer: trends per-day-of-year
+```{r}
+names(orig)
+summary(orig)
+temp_by_md <- h2o.group_by(orig, by="MonthDay",
+                           nrow("temp"), sum("temp"), mean("temp"), sd("temp"))
+temp_by_md.df <- as.data.frame(temp_by_md)
+
+temp_by_md.df  %>%
+  ggplot() +
+    geom_line(mapping = aes(x = MonthDay, y = mean_temp))
+
+###
+```
+
+
+Find increases in weather extremes
+Increases in tornadoes
+
+```{r}
+h2o.summary(orig)
+tornado_by_year <- h2o.group_by(orig, by="Year",
+                           nrow("tornado"), sum("tornado"), 
+                           mean("tornado"), sd("tornado"))
+
+tornado_by_year.df <- as.data.frame(tornado_by_year)
+
+tornado_by_year.df %>%
+  filter(Year != 2016) %>%
+  ggplot() +
+    geom_line(mapping = aes(x = Year, y = sum_tornado))
+```
+
+Increases in std-dev of min & max temps
+```{r}
+
+temp_by_year <- h2o.group_by(orig, by="Year",
+                           max("temp"), min("temp"), 
+                           mean("temp"), sd("temp"))
+
+temp_by_year.df <- as.data.frame(temp_by_year)
+
+# temp
+temp_by_year.df %>%
+  filter(Year != 2016) %>%
+  ggplot() +
+    geom_line(mapping = aes(x = Year, y = max_temp, color = "max_temp")) +
+    geom_line(mapping = aes(x = Year, y = min_temp, color = "min_temp")) 
+
+#sd temp
+temp_by_year.df %>%
+  filter(Year != 2016) %>%
+  ggplot() +
+    geom_line(mapping = aes(x = Year, y = sdev_temp))
+
+```
+
+
+Predict temp for given day & place
+
+step1 - created basic model in flow
+  a. split data 25 - 75
+  b. pick cols
+
+```{r}
+h2o.getModel("glm-da2b9e9f-1d54-4459-8521-fb5119f3f434")
+```
+
+We see that snow and thunder are strong predictors of temp and R2 :  0.3234671
+BUT this is not useful becuase you only know them at the moment
+thus it is not really a prediction
+
+
+Now we are going to try only station and date in order to see if we can 
+predict using this
+```{r}
+h2o.getModel("glm-0a2dfcb7-f79b-4c62-8db1-d5b8b4d31ffb")
+```
+It works very poorly - r2 = 0.08
+
+We noticed that ittreads station and WBAN as numeric. we converted to enum and ran again:
+
+```{r}
+h2o.getModel("glm-f1e8f8e6-3dee-4626-ac7c-0b074df6a606")
+```
+
+got worse - r2 = 0.02
+
+In order to improve the baseline model we are trying to introduce more features:
+
+Using location data from the station df
+
+```{r}
+# j2.split <- h2o.splitFrame(j2)
+# j2.split.75 <- j2.split[[1]]  
+# j2.split.25 <- j2.split[[2]]  
+# 
+
+j2.glm_3 <- h2o.glm(x = c("Station", "elevation", "MonthDay",
+                        "Year", "climate_division"), y = "temp", 
+                  training_frame = j2, nfolds = 3, family = "gaussian")
+j2.glm_3@model$cross_validation_metrics
+```
+
+R2 = 0.11 Boo
+
+Lets add at lng information from out enriched data set
+
+```{r}
+j2.glm_3_lat <- h2o.glm(x = c("Station", "elevation", "latitude", "longitude",
+                              "MonthDay","Year", "climate_division"), y = "temp", 
+                  training_frame = j2, nfolds = 3, family = "gaussian")
+j2.glm_3_lat@model$cross_validation_metrics
+summary(j2.glm_3)
+```
+
+It got better! R2 = 0.29.
+
+The lat long matter! wohoo
+
+Now how about a different algorithm
+
+```{r}
+j2.rf <- h2o.randomForest(x = c("Station", "elevation", "latitude", "longitude",
+                              "MonthDay","Year", "climate_division"), y = "temp", 
+                  max_depth = 5, ntrees = 10, training_frame = j2, nfolds = 3)
+j2.rf@model$cross_validation_metrics
+summary(j2.rf)
+```
+
+WOW we won R2 = 0.5577518
+
+Random forest for the win!
